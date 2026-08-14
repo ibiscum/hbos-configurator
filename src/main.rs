@@ -17,8 +17,10 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use hbos_configurator::handlers::{
-    sambamount_handler, settings_manager_handler, soundcard_detector_handler, soundcard_handler,
-    systeminfo_handler, volume_handler, wifi_handler,
+    configdb_handler, hattools_handler, hostname_handler, i2c_handler, network_handler,
+    pimodel_handler, pipewire_handler, sambaclient_handler, sambamount_handler,
+    settings_manager_handler, soundcard_detector_handler, soundcard_handler, systeminfo_handler,
+    volume_handler, wifi_handler,
 };
 
 // =========================================================================
@@ -53,19 +55,7 @@ struct Args {
 // 📦 Dummy Subsystem Handlers (Core Business Logic Targets)
 // =========================================================================
 // In production, instantiate individual custom structs per domain file.
-struct ConfigDb;
-impl ConfigDb {
-    fn get(&self, key: &str) -> Option<String> {
-        if key == "system.setup_completed" { Some("true".to_string()) } else { None }
-    }
-    fn set(&self, _key: &str, _val: &str) {}
-    fn delete(&self, _key: &str) {}
-}
-
-struct AppState {
-    config_db: ConfigDb,
-    // Add references to SoundcardHandler, SystemdHandler, NetworkHandler, etc here
-}
+struct AppState;
 
 // =========================================================================
 // 🛡️ API Envelope & Response Normalizer (Matches after_request payload)
@@ -122,8 +112,9 @@ async fn get_version() -> impl IntoResponse {
     }))
 }
 
-async fn get_setup_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let is_completed = state.config_db.get("system.setup_completed") == Some("true".to_string());
+async fn get_setup_status(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
+    let db = configdb_handler::CONFIG_DB.lock().unwrap();
+    let is_completed = db.get("system.setup_completed", None, false) == Some("true".to_string());
     Json(ApiEnvelope {
         status: "success".to_string(),
         error: None,
@@ -132,8 +123,9 @@ async fn get_setup_status(State(state): State<Arc<AppState>>) -> impl IntoRespon
     })
 }
 
-async fn complete_setup(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    state.config_db.set("system.setup_completed", "true");
+async fn complete_setup(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut db = configdb_handler::CONFIG_DB.lock().unwrap();
+    db.set("system.setup_completed", "true", false);
     Json(ApiEnvelope {
         status: "success".to_string(),
         error: None,
@@ -142,19 +134,15 @@ async fn complete_setup(State(state): State<Arc<AppState>>) -> impl IntoResponse
     })
 }
 
-async fn reset_setup(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    state.config_db.delete("system.setup_completed");
+async fn reset_setup(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut db = configdb_handler::CONFIG_DB.lock().unwrap();
+    db.delete("system.setup_completed");
     Json(ApiEnvelope {
         status: "success".to_string(),
         error: None,
         message: Some("Setup status reset".to_string()),
         data: None,
     })
-}
-
-async fn get_config_value(Path(key): Path<String>, State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // Ported from configdb.handle_get_config_value(key)
-    Json(json!({ "status": "success", "key": key, "value": "sample" }))
 }
 
 async fn execute_systemd_operation(
@@ -194,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting HiFiBerry Configuration Server (Rust Execution Framework)");
 
-    let state = Arc::new(AppState { config_db: ConfigDb });
+    let state = Arc::new(AppState);
 
     // Business Logic Settings Restoration Triggers
     if args.restore_settings {
@@ -216,11 +204,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/setup/complete", post(complete_setup))
         .route("/api/v1/setup/reset", post(reset_setup))
         // Database Dynamic Handling Bindings
-        .route("/api/v1/key/:key", get(get_config_value).put(get_config_value).post(get_config_value).delete(get_config_value))
+        .route("/api/v1/config/keys", get(configdb_handler::handle_get_config_keys))
+        .route(
+            "/api/v1/config/key/:key",
+            get(configdb_handler::handle_get_config_value).post(configdb_handler::handle_set_config_value).delete(configdb_handler::handle_delete_config_value),
+        )
         // OS Systemd Process Integration Points
         .route("/api/v1/systemd/service/:service/:operation", post(execute_systemd_operation))
         // System information endpoint
         .route("/api/v1/systeminfo", get(systeminfo_handler::handle_get_system_info))
+        // Raspberry Pi model detection endpoint
+        .route("/api/v1/pimodel", get(pimodel_handler::handle_get_pi_model))
+        // Network interface discovery and configuration endpoints
+        .route("/api/v1/network/interfaces", get(network_handler::handle_list_interfaces))
+        .route("/api/v1/network/config", get(network_handler::handle_get_network_config))
+        .route("/api/v1/network/dhcp", post(network_handler::handle_set_dhcp))
+        .route("/api/v1/network/fixed-ip", post(network_handler::handle_set_fixed_ip))
+        .route("/api/v1/network/ipv6/enable", post(network_handler::handle_enable_ipv6))
+        .route("/api/v1/network/ipv6/disable", post(network_handler::handle_disable_ipv6))
+        // PipeWire volume control endpoints
+        .route("/api/v1/pipewire/controls", get(pipewire_handler::handle_list_controls))
+        .route("/api/v1/pipewire/volume", get(pipewire_handler::handle_get_volume).post(pipewire_handler::handle_set_volume))
+        // I2C bus scanning endpoints
+        .route("/api/v1/i2c/scan", get(i2c_handler::handle_scan))
+        .route("/api/v1/i2c/info", get(i2c_handler::handle_info))
+        // Hostname management endpoints
+        .route("/api/v1/hostname", get(hostname_handler::handle_get_hostname).post(hostname_handler::handle_set_hostname))
+        .route("/api/v1/hostname/pretty", post(hostname_handler::handle_set_pretty_hostname))
+        // HAT EEPROM info endpoint
+        .route("/api/v1/hat", get(hattools_handler::handle_get_hat_info))
         // Sound card detection endpoint
         .route("/api/v1/soundcard/detect", get(soundcard_detector_handler::handle_detect_soundcard))
         // Sound card catalogue and detected-card endpoints
@@ -236,6 +248,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/sambamount/mount", post(sambamount_handler::handle_mount))
         .route("/api/v1/sambamount/unmount", post(sambamount_handler::handle_unmount))
         .route("/api/v1/sambamount/mount-all", post(sambamount_handler::handle_mount_all))
+        // SMB/CIFS client discovery endpoints
+        .route("/api/v1/sambaclient/servers", get(sambaclient_handler::handle_list_file_servers))
+        .route("/api/v1/sambaclient/check", get(sambaclient_handler::handle_check_connect))
+        .route("/api/v1/sambaclient/version", get(sambaclient_handler::handle_detect_version))
+        .route("/api/v1/sambaclient/shares", get(sambaclient_handler::handle_list_shares))
         // Setup State context sharing mapping variables
         .route("/api/v1/volume/headphone/controls", get(volume_handler::handle_list_headphone_controls))
         .route("/api/v1/volume/headphone", get(volume_handler::handle_get_headphone_volume).post(volume_handler::handle_set_headphone_volume))
