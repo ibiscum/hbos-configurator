@@ -17,8 +17,8 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use hbos_configurator::handlers::{
-    settings_manager_handler, soundcard_detector_handler, soundcard_handler, systeminfo_handler,
-    volume_handler, wifi_handler,
+    sambamount_handler, settings_manager_handler, soundcard_detector_handler, soundcard_handler,
+    systeminfo_handler, volume_handler, wifi_handler,
 };
 
 // =========================================================================
@@ -231,6 +231,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/settings/save", post(settings_manager_handler::handle_save_all_settings))
         .route("/api/v1/settings/restore", post(settings_manager_handler::handle_restore_all_settings))
         .route("/api/v1/settings/:name", axum::routing::delete(settings_manager_handler::handle_delete_setting))
+        // SMB/CIFS mount management endpoints
+        .route("/api/v1/sambamount", get(sambamount_handler::handle_list_mounts).post(sambamount_handler::handle_add_mount).delete(sambamount_handler::handle_remove_mount))
+        .route("/api/v1/sambamount/mount", post(sambamount_handler::handle_mount))
+        .route("/api/v1/sambamount/unmount", post(sambamount_handler::handle_unmount))
+        .route("/api/v1/sambamount/mount-all", post(sambamount_handler::handle_mount_all))
         // Setup State context sharing mapping variables
         .route("/api/v1/volume/headphone/controls", get(volume_handler::handle_list_headphone_controls))
         .route("/api/v1/volume/headphone", get(volume_handler::handle_get_headphone_volume).post(volume_handler::handle_set_headphone_volume))
