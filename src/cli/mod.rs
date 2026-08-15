@@ -11,5 +11,6 @@ pub mod pipewire_cli;
 pub mod i2c_cli;
 pub mod hostname_cli;
 pub mod hattools_cli;
+pub mod dsptoolkit_cli;
 pub mod configdb_cli;
 pub mod wifi_cli;

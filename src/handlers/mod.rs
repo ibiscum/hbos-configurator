@@ -12,5 +12,6 @@ pub mod pipewire_handler;
 pub mod i2c_handler;
 pub mod hostname_handler;
 pub mod hattools_handler;
+pub mod dsptoolkit_handler;
 pub mod configdb_handler;
 pub mod wifi_handler;

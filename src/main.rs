@@ -17,8 +17,8 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use hbos_configurator::handlers::{
-    configdb_handler, hattools_handler, hostname_handler, i2c_handler, network_handler,
-    pimodel_handler, pipewire_handler, sambaclient_handler, sambamount_handler,
+    configdb_handler, dsptoolkit_handler, hattools_handler, hostname_handler, i2c_handler,
+    network_handler, pimodel_handler, pipewire_handler, sambaclient_handler, sambamount_handler,
     settings_manager_handler, soundcard_detector_handler, soundcard_handler, systeminfo_handler,
     volume_handler, wifi_handler,
 };
@@ -233,6 +233,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/hostname/pretty", post(hostname_handler::handle_set_pretty_hostname))
         // HAT EEPROM info endpoint
         .route("/api/v1/hat", get(hattools_handler::handle_get_hat_info))
+        // DSP hardware detection endpoints
+        .route("/api/v1/dsp/detect", get(dsptoolkit_handler::handle_detect))
+        .route("/api/v1/dsp/status", get(dsptoolkit_handler::handle_status))
+        .route("/api/v1/dsp/name", get(dsptoolkit_handler::handle_name))
         // Sound card detection endpoint
         .route("/api/v1/soundcard/detect", get(soundcard_detector_handler::handle_detect_soundcard))
         // Sound card catalogue and detected-card endpoints

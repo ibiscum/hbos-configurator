@@ -13,5 +13,6 @@ pub mod i2c;
 pub mod hostconfig;
 pub mod hostname_utils;
 pub mod hattools;
+pub mod dsptoolkit;
 pub mod configdb;
 pub mod wifi;
