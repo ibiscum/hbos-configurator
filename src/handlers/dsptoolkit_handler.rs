@@ -35,9 +35,16 @@ impl Default for DspQuery {
 
 /// Handle GET /api/v1/dsp/detect - full DSP detection payload.
 pub async fn handle_detect(Query(query): Query<DspQuery>) -> impl IntoResponse {
-    let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
-    let client = ReqwestDspHttpClient;
-    match toolkit.detect_dsp(&client) {
+    // reqwest::blocking builds its own runtime internally, so it must run
+    // off the async executor thread to avoid a nested-runtime panic.
+    let info = tokio::task::spawn_blocking(move || {
+        let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
+        toolkit.detect_dsp(&ReqwestDspHttpClient)
+    })
+    .await
+    .unwrap_or(None);
+
+    match info {
         Some(info) => (StatusCode::OK, Json(serde_json::json!({ "status": "success", "result": info }))),
         None => (StatusCode::OK, Json(serde_json::json!({ "status": "success", "result": { "status": "unavailable" } }))),
     }
@@ -45,17 +52,26 @@ pub async fn handle_detect(Query(query): Query<DspQuery>) -> impl IntoResponse {
 
 /// Handle GET /api/v1/dsp/status - DSP detection status only.
 pub async fn handle_status(Query(query): Query<DspQuery>) -> impl IntoResponse {
-    let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
-    let client = ReqwestDspHttpClient;
-    let status = toolkit.get_dsp_status(&client);
+    let status = tokio::task::spawn_blocking(move || {
+        let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
+        toolkit.get_dsp_status(&ReqwestDspHttpClient)
+    })
+    .await
+    .unwrap_or_else(|_| "error".to_string());
+
     (StatusCode::OK, Json(serde_json::json!({ "status": "success", "result": { "status": status } })))
 }
 
 /// Handle GET /api/v1/dsp/name - detected DSP name, or 404 if none detected.
 pub async fn handle_name(Query(query): Query<DspQuery>) -> axum::response::Response {
-    let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
-    let client = ReqwestDspHttpClient;
-    match toolkit.get_detected_dsp_name(&client) {
+    let name = tokio::task::spawn_blocking(move || {
+        let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
+        toolkit.get_detected_dsp_name(&ReqwestDspHttpClient)
+    })
+    .await
+    .unwrap_or(None);
+
+    match name {
         Some(name) => (StatusCode::OK, Json(serde_json::json!({ "status": "success", "result": { "name": name } }))).into_response(),
         None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "status": "error", "error": "no DSP detected" }))).into_response(),
     }
