@@ -7,20 +7,8 @@ use crate::api::dsptoolkit::{DSPToolkit, ReqwestDspHttpClient, DEFAULT_DSP_HOST,
 
 #[derive(Deserialize)]
 pub struct DspQuery {
-    #[serde(default = "default_host")]
-    pub host: String,
-    #[serde(default = "default_port")]
-    pub port: u16,
     #[serde(default = "default_timeout")]
     pub timeout: f64,
-}
-
-fn default_host() -> String {
-    DEFAULT_DSP_HOST.to_string()
-}
-
-fn default_port() -> u16 {
-    DEFAULT_DSP_PORT
 }
 
 fn default_timeout() -> f64 {
@@ -29,8 +17,12 @@ fn default_timeout() -> f64 {
 
 impl Default for DspQuery {
     fn default() -> Self {
-        Self { host: default_host(), port: default_port(), timeout: default_timeout() }
+        Self { timeout: default_timeout() }
     }
+}
+
+fn dsp_toolkit(timeout: f64) -> DSPToolkit {
+    DSPToolkit::new(DEFAULT_DSP_HOST, DEFAULT_DSP_PORT, timeout)
 }
 
 /// Handle GET /api/v1/dsp/detect - full DSP detection payload.
@@ -38,7 +30,7 @@ pub async fn handle_detect(Query(query): Query<DspQuery>) -> impl IntoResponse {
     // reqwest::blocking builds its own runtime internally, so it must run
     // off the async executor thread to avoid a nested-runtime panic.
     let info = tokio::task::spawn_blocking(move || {
-        let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
+        let toolkit = dsp_toolkit(query.timeout);
         toolkit.detect_dsp(&ReqwestDspHttpClient)
     })
     .await
@@ -53,7 +45,7 @@ pub async fn handle_detect(Query(query): Query<DspQuery>) -> impl IntoResponse {
 /// Handle GET /api/v1/dsp/status - DSP detection status only.
 pub async fn handle_status(Query(query): Query<DspQuery>) -> impl IntoResponse {
     let status = tokio::task::spawn_blocking(move || {
-        let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
+        let toolkit = dsp_toolkit(query.timeout);
         toolkit.get_dsp_status(&ReqwestDspHttpClient)
     })
     .await
@@ -65,7 +57,7 @@ pub async fn handle_status(Query(query): Query<DspQuery>) -> impl IntoResponse {
 /// Handle GET /api/v1/dsp/name - detected DSP name, or 404 if none detected.
 pub async fn handle_name(Query(query): Query<DspQuery>) -> axum::response::Response {
     let name = tokio::task::spawn_blocking(move || {
-        let toolkit = DSPToolkit::new(&query.host, query.port, query.timeout);
+        let toolkit = dsp_toolkit(query.timeout);
         toolkit.get_detected_dsp_name(&ReqwestDspHttpClient)
     })
     .await
@@ -80,41 +72,13 @@ pub async fn handle_name(Query(query): Query<DspQuery>) -> axum::response::Respo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::to_bytes;
-    use serde_json::Value;
 
-    async fn body_json(response: axum::response::Response) -> Value {
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        serde_json::from_slice(&body).unwrap()
-    }
-
-    // No real DSP service runs in tests, so every endpoint exercises the
-    // "unavailable"/not-detected path against an unreachable loopback port.
-    fn unreachable_query() -> Query<DspQuery> {
-        Query(DspQuery { host: "127.0.0.1".to_string(), port: 1, timeout: 0.5 })
-    }
-
-    #[tokio::test]
-    async fn detect_returns_unavailable_when_service_unreachable() {
-        let response = handle_detect(unreachable_query()).await.into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-        let payload = body_json(response).await;
-        assert_eq!(payload["status"], "success");
-        assert_eq!(payload["result"]["status"], "unavailable");
-    }
-
-    #[tokio::test]
-    async fn status_returns_unavailable_when_service_unreachable() {
-        let response = handle_status(unreachable_query()).await.into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-        let payload = body_json(response).await;
-        assert_eq!(payload["result"]["status"], "unavailable");
-    }
-
-    #[tokio::test]
-    async fn name_returns_not_found_when_service_unreachable() {
-        let response = handle_name(unreachable_query()).await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert_eq!(body_json(response).await["status"], "error");
+    #[test]
+    fn http_api_always_targets_the_configured_local_dsp_service() {
+        let query: DspQuery =
+            serde_json::from_str(r#"{"host":"169.254.169.254","port":80,"timeout":1.0}"#).unwrap();
+        let toolkit = dsp_toolkit(query.timeout);
+        assert_eq!(toolkit.host, DEFAULT_DSP_HOST);
+        assert_eq!(toolkit.port, DEFAULT_DSP_PORT);
     }
 }
